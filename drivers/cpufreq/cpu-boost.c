@@ -211,9 +211,28 @@ static int boost_mig_sync_thread(void *data)
 		if (ret)
 			continue;
 
-		ret = cpufreq_get_policy(&dest_policy, dest_cpu);
-		if (ret)
-			continue;
+	/* Force policy re-evaluation to trigger adjust notifier. */
+	get_online_cpus();
+	if (cpu_online(src_cpu))
+		/*
+		 * Send an unchanged policy update to the source
+		 * CPU. Even though the policy isn't changed from
+		 * its existing boosted or non-boosted state
+		 * notifying the source CPU will let the governor
+		 * know a boost happened on another CPU and that it
+		 * should re-evaluate the frequency at the next timer
+		 * event without interference from a min sample time.
+		 */
+		cpufreq_update_policy(src_cpu);
+	if (cpu_online(dest_cpu)) {
+		cpufreq_update_policy(dest_cpu);
+		queue_delayed_work_on(0, cpu_boost_wq,
+			&s->boost_rem, msecs_to_jiffies(boost_ms));
+	} else {
+		s->boost_min = 0;
+	}
+	put_online_cpus();
+}
 
 		if (dest_policy.cur >= src_policy.cur ) {
 			pr_debug("No sync. CPU%d@%dKHz >= CPU%d@%dKHz\n",
