@@ -160,6 +160,13 @@ config CPU_FREQ_DEFAULT_GOV_IMPULSE
 	help
 	  Use the CPUFreq governor 'impulse' as default.
 
+config CPU_FREQ_DEFAULT_GOV_OPTIMAX
+	bool "optimax"
+	select CPU_FREQ_GOV_OPTIMAX
+	select CPU_FREQ_GOV_PERFORMANCE
+	help
+	  Use the CPUFreq governor 'optimax' as default
+
 endchoice
 
 config CPU_FREQ_GOV_PERFORMANCE
@@ -354,6 +361,12 @@ config CPU_FREQ_GOV_IMPULSE
 	  designed for optimized balance between power and performance.
 
 	  If in doubt, say N.
+
+config CPU_FREQ_GOV_OPTIMAX
+	tristate "'optimax' cpufreq policy governor"
+	select CPU_FREQ_TABLE
+	help
+	  'optimax' is the best gov ever
 
 menu "x86 CPU frequency scaling drivers"
 depends on X86
