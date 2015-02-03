@@ -2146,9 +2146,7 @@ static int pp_ad_calc_bl(struct msm_fb_data_type *mfd, int bl_in, int *bl_out,
 		pr_debug("AD not supported on device.\n");
 		return ret;
 	} else if (ret || !ad) {
-
-		pr_debug("Failed to get ad info: ret = %d, ad = 0x%p.\n",
-
+		pr_err("Failed to get ad info: ret = %d, ad = 0x%p.\n",
 				ret, ad);
 		return ret;
 	}
