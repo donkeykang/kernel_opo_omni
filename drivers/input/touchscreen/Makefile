@@ -92,3 +92,5 @@ obj-$(CONFIG_TOUCHSCREEN_SYNAPTICS_S3508_I2C_RMI) += synaptics_dsx_fw_update.o
 obj-$(CONFIG_TOUCHSCREEN_SYNAPTICS_S3508_I2C_RMI) += synaptics_dsx_rmi_dev.o
 #OPPO yubin 2013-10-10 add end for tp
 #endif
+
+obj-y += touchboost.o
