@@ -31,6 +31,10 @@
 #ifdef CONFIG_VENDOR_EDIT
 #include <linux/boot_mode.h>
 #endif //CONFIG_VENDOR_EDIT
+#ifdef CONFIG_LCD_NOTIFY
+#include <linux/lcd_notify.h>
+#endif
+
 #define REG_CTRL	0x00
 #define REG_CONFIG	0x01
 #define REG_BRT_A	0x03
@@ -414,6 +418,22 @@ int lm3630_bank_a_update_status(u32 bl_level)
 	struct lm3630_chip_data *pchip = lm3630_pchip;
 	pr_debug("%s: bl=%d\n", __func__,bl_level);
 
+#ifdef CONFIG_LCD_NOTIFY
+	// LDC notifier
+	// if display is switched off
+	if (bl_level == 0) 
+	{
+		lcd_notifier_call_chain(LCD_EVENT_OFF_START);
+		lcd_notifier_call_chain(LCD_EVENT_OFF_END);
+	}
+	// if display is switched on
+	if (bl_level != 0 && pre_brightness == 0) 
+	{
+		lcd_notifier_call_chain(LCD_EVENT_ON_START);
+		lcd_notifier_call_chain(LCD_EVENT_ON_END);
+	}
+#endif
+	
 	if(!pchip){
 		dev_err(pchip->dev, "lm3630_bank_a_update_status pchip is null\n");
 		return -ENOMEM;
