@@ -47,7 +47,7 @@ struct cpu_stats {
 	struct notifier_block notif;
 	u64 timestamp;
 	bool booted;
-} stats = {
+} makostats = {
 	.counter = 0,
 	.timestamp = 0,
 	.booted = false,
@@ -151,14 +151,14 @@ static void cpu_revive(unsigned int load)
 	 * cpus in question. If the device is under stress for at least 300ms
 	 * online all cores, no questions asked. 300ms here equals three samples
 	 */
-	if (load >= HIGH_LOAD && stats.counter >= counter_hysteria)
+	if (load >= HIGH_LOAD && makostats.counter >= counter_hysteria)
 		goto online_all;
-	else if (stats.counter < t->high_load_counter)
+	else if (makostats.counter < t->high_load_counter)
 		return;
 
 online_all:
 	cpus_online_work();
-	stats.timestamp = ktime_to_us(ktime_get());
+	makostats.timestamp = ktime_to_us(ktime_get());
 }
 
 static void cpu_smash(unsigned int load)
@@ -166,7 +166,7 @@ static void cpu_smash(unsigned int load)
 	struct hotplug_tunables *t = &tunables;
 	u64 extra_time = MIN_CPU_UP_US;
 
-	if (stats.counter >= t->high_load_counter)
+	if (makostats.counter >= t->high_load_counter)
 		return;
 
 	/*
@@ -175,7 +175,7 @@ static void cpu_smash(unsigned int load)
 	 * postpone the cpu offline process to at least another second
 	 */
 	if (cpus_cpufreq_work())
-		stats.timestamp = ktime_to_us(ktime_get());
+		makostats.timestamp = ktime_to_us(ktime_get());
 
 	/*
 	 * Let's not unplug this cpu unless its been online for longer than
@@ -185,7 +185,7 @@ static void cpu_smash(unsigned int load)
 	if (t->min_time_cpu_online > 1)
 		extra_time = t->min_time_cpu_online * MIN_CPU_UP_US;
 
-	if (ktime_to_us(ktime_get()) < stats.timestamp + extra_time)
+	if (ktime_to_us(ktime_get()) < makostats.timestamp + extra_time)
 		return;
 
 	/*
@@ -200,7 +200,7 @@ static void cpu_smash(unsigned int load)
 	/*
 	 * reset the counter yo
 	 */
-	stats.counter = 0;
+	makostats.counter = 0;
 }
 
 static void __ref decide_hotplug_func(struct work_struct *work)
@@ -230,14 +230,14 @@ static void __ref decide_hotplug_func(struct work_struct *work)
 	cur_load >>= 1;
 
 	if (cur_load >= t->load_threshold) {
-		if (stats.counter < t->max_load_counter)
-			++stats.counter;
+		if (makostats.counter < t->max_load_counter)
+			++makostats.counter;
 
 		if (online_cpus <= 2)
 			cpu_revive(cur_load);
 	} else {
-		if (stats.counter)
-			--stats.counter;
+		if (makostats.counter)
+			--makostats.counter;
 
 		if (online_cpus > 2)
 			cpu_smash(cur_load);
@@ -266,13 +266,13 @@ static int lcd_notifier_callback(struct notifier_block *this,
 	unsigned long event, void *data)
 {
 	if (event == LCD_EVENT_ON_START) {
-		if (!stats.booted) {
+		if (!makostats.booted) {
 			/*
 			 * let's start messing with the cores only after
 			 * the device has booted up
 			 */
 			queue_delayed_work_on(0, wq, &decide_hotplug, 0);
-			stats.booted = true;
+			makostats.booted = true;
 		} else
 			queue_work_on(0, wq, &resume);
 	} else if (event == LCD_EVENT_OFF_START)
@@ -483,9 +483,9 @@ static int __devinit mako_hotplug_probe(struct platform_device *pdev)
 	t->min_time_cpu_online = DEFAULT_MIN_TIME_CPU_ONLINE;
 	t->timer = DEFAULT_TIMER;
 
-	stats.notif.notifier_call = lcd_notifier_callback;
+	makostats.notif.notifier_call = lcd_notifier_callback;
 
-	if (lcd_register_client(&stats.notif)) {
+	if (lcd_register_client(&makostats.notif)) {
 		ret = -EINVAL;
 		goto err;
 	}
