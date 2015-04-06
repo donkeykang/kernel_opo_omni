@@ -31,6 +31,7 @@
 
 #define MAKO_HOTPLUG "mako_hotplug"
 
+#define DEFAULT_HOTPLUG_ENABLED 1
 #define DEFAULT_LOAD_THRESHOLD 85
 #define DEFAULT_HIGH_LOAD_COUNTER 10
 #define DEFAULT_MAX_LOAD_COUNTER 20
@@ -264,8 +265,6 @@ static void mako_hotplug_suspend(struct work_struct *work)
 	cpus_offline_work();
 	if (!t->enabled)
 		return;
-	if (makostats.suspend)
-		return;
 
 	pr_info("%s: suspend\n", MAKO_HOTPLUG);
 }
@@ -275,8 +274,6 @@ static void __ref mako_hotplug_resume(struct work_struct *work)
 	struct hotplug_tunables *t = &tunables;
 	cpus_online_work();
 	if (!t->enabled)
-		return;
-	if (makostats.suspend)
 		return;
 	
 		pr_info("%s: resu	me\n", MAKO_HOTPLUG);
