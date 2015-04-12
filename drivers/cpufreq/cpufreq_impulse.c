@@ -117,7 +117,7 @@ static u64 boostpulse_endtime;
  * Max additional time to wait in idle, beyond timer_rate, at speeds above
  * minimum before wakeup to reduce speed, or -1 if unnecessary.
  */
-#define DEFAULT_TIMER_SLACK (4 * DEFAULT_TIMER_RATE)
+#define DEFAULT_TIMER_SLACK 30000
 static int timer_slack_val = DEFAULT_TIMER_SLACK;
 
 /*
@@ -128,7 +128,7 @@ static int timer_slack_val = DEFAULT_TIMER_SLACK;
 static bool align_windows = true;
 
 /* Improves frequency selection for more energy */
-static bool powersave_bias;
+static bool powersave_bias = 1;
 
 /*
  * Stay at max freq for at least max_freq_hysteresis before dropping
