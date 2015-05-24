@@ -25,7 +25,7 @@
 #include <linux/of.h>
 
 unsigned int temp_threshold = 70;
-module_param(temp_threshold, int, 0755);
+module_param(temp_threshold, int, 0644);
 
 static struct thermal_info {
 	uint32_t cpuinfo_max_freq;
@@ -144,7 +144,7 @@ reschedule:
 	schedule_delayed_work_on(0, &check_temp_work, msecs_to_jiffies(250));
 }
 
-static int __devinit msm_thermal_dev_probe(struct platform_device *pdev)
+static int msm_thermal_dev_probe(struct platform_device *pdev)
 {
 	int ret = 0;
 	struct device_node *node = pdev->dev.of_node;
@@ -191,12 +191,12 @@ static struct platform_driver msm_thermal_device_driver = {
 	},
 };
 
-static int __init msm_thermal_device_init(void)
+int __init  msm_thermal_device_init(void)
 {
 	return platform_driver_register(&msm_thermal_device_driver);
 }
 
-static void __exit msm_thermal_device_exit(void)
+void __exit msm_thermal_device_exit(void)
 {
 	platform_driver_unregister(&msm_thermal_device_driver);
 }
