@@ -1,5 +1,5 @@
 #!/bin/bash
-TOOLCHAIN="/home/nando/dev/toolchains/uber49/bin"
+TOOLCHAIN="/home/nando/dev/toolchains/gcc49/bin"
 JOBS="-j$(grep -c ^processor /proc/cpuinfo)"
 echo "Cleaning old files"
 rm -f ../AnykernelOMNI/dtb
@@ -11,8 +11,8 @@ make clean && make mrproper
 
 export ARCH=arm
 export SUBARCH=arm
-make CROSS_COMPILE=$TOOLCHAIN/arm-eabi- msm8974_find7op_defconfig
-make CROSS_COMPILE=$TOOLCHAIN/arm-eabi- $JOBS
+make CROSS_COMPILE=$TOOLCHAIN/arm-linux-androideabi- msm8974_find7op_defconfig
+make CONFIG_NO_ERROR_ON_MISMATCH=y CROSS_COMPILE=$TOOLCHAIN/arm-linux-androideabi- $JOBS
 echo "End of compiling kernel!"
 
 DATE_END=$(date +"%s")
