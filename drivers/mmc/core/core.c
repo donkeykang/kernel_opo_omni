@@ -45,6 +45,13 @@
 #include "sd_ops.h"
 #include "sdio_ops.h"
 
+#ifdef CONFIG_OPPO_DEVICE_N3
+extern void mmc_sd_remove(struct mmc_host *host);
+
+//Zhilong.Zhang@OnlineRd.Driver, 2014/09/19, Add for detect tf card
+#include <linux/gpio.h>
+#endif
+
 #define CREATE_TRACE_POINTS
 #include <trace/events/mmc.h>
 
@@ -2852,7 +2859,8 @@ out:
 	return;
 }
 
-static bool mmc_is_vaild_state_for_clk_scaling(struct mmc_host *host)
+static bool mmc_is_vaild_state_for_clk_scaling(struct mmc_host *host,
+				enum mmc_load state)
 {
 	struct mmc_card *card = host->card;
 	u32 status;
@@ -2865,7 +2873,8 @@ static bool mmc_is_vaild_state_for_clk_scaling(struct mmc_host *host)
 	 */
 	if (!card || (mmc_card_mmc(card) &&
 			card->part_curr == EXT_CSD_PART_CONFIG_ACC_RPMB)
-			|| host->clk_scaling.invalid_state)
+			|| (state != MMC_LOAD_LOW &&
+				host->clk_scaling.invalid_state))
 		goto out;
 
 	if (mmc_send_status(card, &status)) {
@@ -2896,7 +2905,7 @@ static int mmc_clk_update_freq(struct mmc_host *host,
 	}
 
 	if (freq != host->clk_scaling.curr_freq) {
-		if (!mmc_is_vaild_state_for_clk_scaling(host)) {
+		if (!mmc_is_vaild_state_for_clk_scaling(host, state)) {
 			err = -EAGAIN;
 			goto error;
 		}
@@ -3190,11 +3199,46 @@ int mmc_detect_card_removed(struct mmc_host *host)
 }
 EXPORT_SYMBOL(mmc_detect_card_removed);
 
+//Zhilong.Zhang@OnlineRd.Driver, 2014/09/19, Add for detect tf card
+#ifdef CONFIG_OPPO_DEVICE_N3
+struct _mmc_cd_gpio {
+	unsigned int gpio;
+	char label[0];
+	bool status;
+};
+
+static int mmc_cd_get_tf_status(struct mmc_host *host)
+{
+	int ret = -ENOSYS;
+	struct _mmc_cd_gpio *cd = host->hotplug.handler_priv;
+
+	if (!cd || !gpio_is_valid(cd->gpio))
+		goto out;
+
+	ret = !gpio_get_value_cansleep(cd->gpio) ^
+		!!(host->caps2 & MMC_CAP2_CD_ACTIVE_HIGH);
+out:
+	return ret;
+}
+
+extern void removed_tf_card(struct mmc_host *host);
+
+#endif
+
 void mmc_rescan(struct work_struct *work)
 {
 	struct mmc_host *host =
 		container_of(work, struct mmc_host, detect.work);
 	bool extend_wakelock = false;
+//Zhilong.Zhang@OnlineRd.Driver, 2014/09/19, Add for detect tf card
+#ifdef CONFIG_OPPO_DEVICE_N3
+	int status;
+	status = mmc_cd_get_tf_status(host);
+	
+	if(!status && !host->bus_dead) {
+		mmc_schedule_delayed_work(&host->detect, 2 * HZ);
+	}	
+#endif
 
 	if (host->rescan_disable)
 		return;
@@ -3260,6 +3304,16 @@ void mmc_rescan(struct work_struct *work)
 	mmc_release_host(host);
 	mmc_rpm_release(host, &host->class_dev);
  out:
+
+//Zhilong.Zhang@OnlineRd.Driver, 2014/09/19, Add for detect tf card
+#ifdef CONFIG_OPPO_DEVICE_N3
+ 	if (mmc_cd_get_tf_status(host) == 0){
+		cancel_delayed_work(&host->detect);
+		if (host && host->card)
+			removed_tf_card(host);
+ 	}
+#endif
+
 	/* only extend the wakelock, if suspend has not started yet */
 	if (extend_wakelock && !host->rescan_disable)
 		wake_lock_timeout(&host->detect_wake_lock, HZ / 2);

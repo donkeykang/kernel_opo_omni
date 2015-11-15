@@ -1504,7 +1504,7 @@ static int mmc_blk_err_check(struct mmc_card *card,
 	 */
 	if (brq->sbc.error || brq->cmd.error || brq->stop.error ||
 	    brq->data.error) {
-
+		
 #ifdef CONFIG_VENDOR_EDIT
 //Zhilong.Zhang@OnlineRd.Driver, 2013/12/28, Add for solve QT bug(ID:390597): Bad micro SD card cause the phone to suspend/wakeup abnormal
 		if ((card->host->index == 1) && bad_micro_sd_card) {

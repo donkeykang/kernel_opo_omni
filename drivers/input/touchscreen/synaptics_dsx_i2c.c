@@ -39,6 +39,8 @@
 #include "synaptics_dsx_i2c.h"
 #ifdef CONFIG_OPPO_DEVICE_FIND7OP  //for 14001's  tp
 #include "synaptics_test_rawdata_14001.h"
+#elif defined(CONFIG_OPPO_DEVICE_N3)
+#include "synaptics_test_rawdata_n3.h"
 #else
 #include "synaptics_test_rawdata.h"
 #endif
@@ -105,6 +107,24 @@ char *tp_firmware_strings[TP_TYPE_MAX][LCD_TYPE_MAX] = {
 #define NO_SLEEP_OFF (0 << 2)
 #define NO_SLEEP_ON (1 << 2)
 #define CONFIGURED (1 << 7)
+
+#ifdef CONFIG_OPPO_DEVICE_N3
+static atomic_t key_is_touched;
+#endif
+
+/*************** log definition **********************************/
+#define TS_ERROR   1
+#define TS_WARNING 2
+#define TS_INFO    3
+#define TS_DEBUG   4
+#define TS_TRACE   5
+static int syna_log_level = TS_INFO;
+#define print_ts(level, ...) \
+	do { \
+		if (syna_log_level >= (level)) \
+		printk(__VA_ARGS__); \
+	} while (0) 
+/*****************************************************************/
 
 static int synaptics_rmi4_i2c_read(struct synaptics_rmi4_data *rmi4_data,
 		unsigned short addr, unsigned char *data,
@@ -375,10 +395,6 @@ struct synaptics_rmi4_exp_fn_data {
 
 static struct synaptics_rmi4_exp_fn_data exp_data;
 static int synaptics_set_int_mask(struct synaptics_rmi4_data *ts, int enable);
-static ssize_t synaptics_rmi4_gesture_store(struct device *dev,
-		struct device_attribute *attr, const char *buf, size_t count);
-static ssize_t synaptics_rmi4_gesture_show(struct device *dev,
-		struct device_attribute *attr, char *buf);
 static ssize_t synaptics_rmi4_baseline_show(struct device *dev,
 		struct device_attribute *attr, char *buf);
 static ssize_t synaptics_rmi4_baseline_store(struct device *dev,
@@ -401,6 +417,10 @@ static ssize_t synaptics_rmi4_flashlight_store(struct kobject *kobj,
 static ssize_t synaptics_rmi4_camera_show(struct kobject *kobj,
 		struct kobj_attribute *attr, char *buf);
 static ssize_t synaptics_rmi4_camera_store(struct kobject *kobj,
+		struct kobj_attribute *attr, const char *buf, size_t count);
+static ssize_t synaptics_rmi4_button_disable_show(struct kobject *kobj,
+		struct kobj_attribute *attr, char *buf);
+static ssize_t synaptics_rmi4_button_disable_store(struct kobject *kobj,
 		struct kobj_attribute *attr, const char *buf, size_t count);
 
 static struct device_attribute attrs[] = {
@@ -427,9 +447,6 @@ static struct device_attribute attrs[] = {
 	__ATTR(suspend, S_IWUSR,
 			synaptics_rmi4_show_error,
 			synaptics_rmi4_suspend_store),
-	__ATTR(gesture, (S_IRUGO | S_IWUSR),
-			synaptics_rmi4_gesture_show,
-			synaptics_rmi4_gesture_store),
 	__ATTR(baseline_test, (S_IRUGO | S_IWUSR),
 			synaptics_rmi4_baseline_show,
 			synaptics_rmi4_baseline_store),
@@ -458,10 +475,15 @@ static struct kobj_attribute camera_attribute = __ATTR(camera_enable, (S_IRUGO |
 			synaptics_rmi4_camera_show,
 			synaptics_rmi4_camera_store);
 
+static struct kobj_attribute buttons_disable_attribute = __ATTR(button_disable, (S_IRUGO | S_IWUSR),
+			synaptics_rmi4_button_disable_show,
+			synaptics_rmi4_button_disable_store);
+
 static struct attribute *gesture_attrs[] = {
 	&double_tap_attribute.attr,
 	&flashlight_attribute.attr,
 	&camera_attribute.attr,
+	&buttons_disable_attribute.attr,
 	NULL
 };
 
@@ -968,8 +990,7 @@ static int synaptics_rmi4_f11_abs_report(struct synaptics_rmi4_data *rmi4_data,
 #ifndef TYPE_B_PROTOCOL
 			input_mt_sync(rmi4_data->input_dev);
 #endif
-
-			dev_dbg(&rmi4_data->i2c_client->dev,
+			print_ts(TS_DEBUG, KERN_ERR
 					"%s: Finger %d:\n"
 					"status = 0x%02x\n"
 					"x = %d\n"
@@ -1054,33 +1075,26 @@ static int synaptics_rmi4_f11_abs_report(struct synaptics_rmi4_data *rmi4_data,
 #define SYNA_ADDR_GESTURE_FLAG       0x20  //gesture enable register
 #define SYNA_ADDR_GLOVE_FLAG       	 0x1f  //glove enable register
 #define SYNA_ADDR_GESTURE_OFFSET     0x08  //gesture register addr=0x08
-#define SYNA_ADDR_GESTURE_EXT        0x402  //gesture ext data
+#ifndef CONFIG_OPPO_DEVICE_N3
+#define SYNA_ADDR_GESTURE_EXT  		0x402 //gesture ext data, for 13077 and 14001
+#else
+#define SYNA_ADDR_GESTURE_EXT  		0x400 //gesture ext data, for 14021
+#endif
 #define SYNA_ADDR_SMARTCOVER_EXT     0x41f  //smartcover mode
 #define SYNA_ADDR_PDOZE_FLAG         0x07  //pdoze status register
 #define SYNA_ADDR_TOUCH_FEATURE      0x1E  //ThreeD Touch Features
 #define SYNA_ADDR_F12_2D_CTRL23      0x1D
 #define SYNA_ADDR_F12_2D_CTRL10      0x16
-
 #define SYNA_ADDR_F54_ANALOG_CTRL113 0x136
+#ifdef CONFIG_OPPO_DEVICE_N3
+#define SYNA_ADDR_F1A_0D_DATA02      0x201 //0D double tap wakeup Gesture
+#endif
+
 extern int rmi4_fw_module_init(bool insert);
 
 #define F54_CTRL_BASE_ADDR		(syna_rmi4_data->f54_ctrl_base_addr)
 #define F54_CMD_BASE_ADDR		(syna_rmi4_data->f54_cmd_base_addr)
 #define F54_DATA_BASE_ADDR		(syna_rmi4_data->f54_data_base_addr)
-
-/*************** log definition **********************************/
-#define TS_ERROR   1
-#define TS_WARNING 2
-#define TS_INFO    3
-#define TS_DEBUG   4
-#define TS_TRACE   5
-static int syna_log_level = TS_INFO;
-#define print_ts(level, ...) \
-	do { \
-		if (syna_log_level >= (level)) \
-		printk(__VA_ARGS__); \
-	} while (0) 
-/*****************************************************************/
 
 static struct synaptics_rmi4_data *syna_rmi4_data=0;
 static struct regulator *vdd_regulator=0;
@@ -1121,6 +1135,13 @@ static struct tp_vkey_button
 #define LCD_MAX_Y_FIND7S  (2560)
 #define LCD_MULTI_RATIO(m)   (((syna_lcd_ratio1)*(m))/(syna_lcd_ratio2))
 #define VK_LCD_WIDTH  LCD_MULTI_RATIO(LCD_MAX_X/TP_VKEY_COUNT)   // 3 keys
+
+#if defined CONFIG_OPPO_DEVICE_N3
+#define VK_VENTE_Y  2120
+#else
+#define VK_VENTE_Y  1974
+#endif
+
 static void vk_calculate_area(void)  //added by liujun
 {
 	int i;
@@ -1132,15 +1153,20 @@ static void vk_calculate_area(void)  //added by liujun
 	int margin_x = 85;
 	print_ts(TS_DEBUG, KERN_ERR "maxx=%d,maxy=%d,vkh=%d\n",syna_ts_data->sensor_max_x,syna_ts_data->sensor_max_y,syna_ts_data->virtual_key_height);
 
+#ifdef CONFIG_OPPO_DEVICE_N3
+    syna_ts_data->vk_prop_center_y = LCD_MULTI_RATIO(VK_VENTE_Y);
+    syna_ts_data->vk_prop_height = LCD_MULTI_RATIO(150);
+    syna_ts_data->vk_prop_width = LCD_MULTI_RATIO(220);
+#else
 	syna_ts_data->vk_prop_width = LCD_MULTI_RATIO(190);
-	if (get_pcb_version() <= HW_VERSION__20) {
-		syna_ts_data->vk_prop_center_y = LCD_MULTI_RATIO(1974);
+	if (get_pcb_version() < HW_VERSION__20) {
+		syna_ts_data->vk_prop_center_y = LCD_MULTI_RATIO(VK_VENTE_Y);
 		syna_ts_data->vk_prop_height = LCD_MULTI_RATIO(120);
 	} else {
 		syna_ts_data->vk_prop_center_y = 2626;
 		syna_ts_data->vk_prop_height = 152;
 	}
-
+#endif
 
 	for (i = 0; i < TP_VKEY_COUNT; ++i)
 	{
@@ -1209,16 +1235,21 @@ static int synaptics_ts_init_virtual_key(struct synaptics_rmi4_data *ts )
 	/* virtual keys */
 	return ret;
 }
-static int get_virtual_key_button(int x, int y)
+static int get_virtual_key_button(struct synaptics_rmi4_data *rmi4_data, int x, int y)
 {
 	int i;
 	int lcdheight = LCD_MAX_Y ;
 
-	if (get_pcb_version() > HW_VERSION__20)
+#ifndef CONFIG_OPPO_DEVICE_N3
+	if (get_pcb_version() >= HW_VERSION__20)
 		lcdheight = LCD_MAX_Y_FIND7S ;
+#endif
 
 	if(y <= lcdheight)
 		return 0;
+
+	if (rmi4_data->button_disable)
+		return TP_VKEY_NONE;
 
 	for (i = 0; i < TP_VKEY_NONE; ++i)
 	{
@@ -1264,7 +1295,6 @@ static int synaptics_set_f12ctrl_data(struct synaptics_rmi4_data *rmi4_data, boo
 			reportbuf[2] |= 0x02 ;
 		else {
 			reportbuf[2] &= 0xfd ;
-			syna_use_gesture = (rmi4_data->gesture_flags&0xff)?1:0 ;
 		}
 	}
 
@@ -1339,43 +1369,6 @@ static int synaptics_enable_irqwake(struct synaptics_rmi4_data *rmi4_data, bool 
 
 	return 0 ;
 }
-
-static ssize_t synaptics_rmi4_gesture_show(struct device *dev,
-		struct device_attribute *attr, char *buf)
-{
-	return snprintf(buf, PAGE_SIZE, "%u\n",syna_use_gesture);
-}
-
-static ssize_t synaptics_rmi4_gesture_store(struct device *dev,
-		struct device_attribute *attr, const char *buf, size_t count)
-{
-	unsigned int input;
-
-	if (sscanf(buf, "%u", &input) != 1)
-		return -EINVAL;
-
-	if (input == 21) {
-		if(syna_use_gesture == 0) {
-			syna_use_gesture = 1 ;
-			synaptics_enable_gesture(syna_rmi4_data,true);
-		}
-	}
-	else if (input == 20) {
-		if(syna_use_gesture) {
-			synaptics_enable_gesture(syna_rmi4_data,false);
-			syna_use_gesture = 0 ;
-		}
-	} else if(input == 1) {
-		syna_use_gesture = 1 ;
-	} else if(input == 0) {
-		syna_use_gesture = 0 ;
-	}
-	else
-		return -EINVAL;
-
-	return count;
-}
-
 
 //support tp2.0 interface, app read it to get points
 static int synaptics_rmi4_crood_read(char *page, char **start, off_t off,
@@ -1508,6 +1501,29 @@ static ssize_t synaptics_rmi4_camera_store(struct kobject *kobj,
 	if(!(syna_use_gesture && syna_rmi4_data->gesture))
 		syna_use_gesture = (syna_rmi4_data->gesture_flags&0xff)?1:0 ;
 	print_ts(TS_DEBUG, KERN_ERR "enable=0x%x\n", syna_rmi4_data->gesture_flags);
+
+	return count;
+}
+
+static ssize_t synaptics_rmi4_button_disable_show(struct kobject *kobj,
+		struct kobj_attribute *attr, char *buf) {
+	int len = 0 ;
+
+	len = sprintf(buf, "%d\n", syna_rmi4_data->button_disable);
+
+	return len ;
+}
+
+static ssize_t synaptics_rmi4_button_disable_store(struct kobject *kobj,
+		struct kobj_attribute *attr, const char *buf, size_t count) {
+	unsigned int enable;
+
+	if (sscanf(buf, "%u", &enable) != 1)
+		return -EINVAL;
+
+	syna_rmi4_data->button_disable = (enable == 1) ? true : false;
+
+	print_ts(TS_DEBUG, KERN_ERR "button_disable=%d\n", syna_rmi4_data->button_disable);
 
 	return count;
 }
@@ -1816,24 +1832,50 @@ static ssize_t synaptics_rmi4_baseline_data(char *buf, bool savefile)
 
 	if (syna_ts_data->vendor_id == TP_VENDOR_TRULY)
 	{
+#ifdef CONFIG_OPPO_DEVICE_N3
+		tx_num = TX_NUM_TRULY_N3;
+		rx_num = RX_NUM_TRULY_N3;
+		rx2rx_lower_limit = DiagonalLowerLimit_TRULY;
+		rx2rx_upper_limit = DiagonalUpperLimit_TRULY;
+		raw_cap_data = (const int16_t *)raw_cap_data_turly_N3;
+		iCbcDataSize = sizeof(raw_cap_data_turly_N3);
+#else
 		tx_num = TX_NUM_TRULY;
 		rx_num = RX_NUM_TRULY;
 		rx2rx_lower_limit = DiagonalLowerLimit_TRULY;
 		rx2rx_upper_limit = DiagonalUpperLimit_TRULY;
 		raw_cap_data = (const int16_t *)raw_cap_data_truly_3035;
 		iCbcDataSize = sizeof(raw_cap_data_truly_3035);
+#endif
 	}
 	else if (syna_ts_data->vendor_id == TP_VENDOR_WINTEK)
 	{
+#ifdef CONFIG_OPPO_DEVICE_N3
+		tx_num = TX_NUM_WINTEK_N3;
+		rx_num = RX_NUM_WINTEK_N3;
+		rx2rx_lower_limit = DiagonalLowerLimit_WINTEK;
+		rx2rx_upper_limit = DiagonalUpperLimit_WINTEK;
+		raw_cap_data = (const int16_t *)raw_cap_data_wintek_N3;
+		iCbcDataSize = sizeof(raw_cap_data_wintek_N3);
+#else
 		tx_num = TX_NUM_WINTEK;
 		rx_num = RX_NUM_WINTEK;
 		rx2rx_lower_limit = DiagonalLowerLimit_WINTEK;
 		rx2rx_upper_limit = DiagonalUpperLimit_WINTEK;
 		raw_cap_data = (const int16_t *)raw_cap_data_wintek_9093;
 		iCbcDataSize = sizeof(raw_cap_data_wintek_9093);
+#endif
 	}
 	else if (syna_ts_data->vendor_id == TP_VENDOR_TPK)
 	{
+#ifdef CONFIG_OPPO_DEVICE_N3
+		tx_num = TX_NUM_TPK_N3;
+		rx_num = RX_NUM_TPK_N3;
+		rx2rx_lower_limit = DiagonalLowerLimit_TPK;
+		rx2rx_upper_limit = DiagonalUpperLimit_TPK;
+		raw_cap_data = (const int16_t *)raw_cap_data_tpk_N3;
+		iCbcDataSize = sizeof(raw_cap_data_tpk_N3);
+#else
 		tx_num = TX_NUM_TPK;
 		rx_num = RX_NUM_TPK;
 		rx2rx_lower_limit = DiagonalLowerLimit_TPK;
@@ -1846,6 +1888,7 @@ static ssize_t synaptics_rmi4_baseline_data(char *buf, bool savefile)
 			raw_cap_data = (const int16_t *)raw_cap_data_tpk_find7s;
 			iCbcDataSize = sizeof(raw_cap_data_tpk_find7s);
 		}
+#endif
 	}
 	else if (syna_ts_data->vendor_id == TP_VENDOR_YOUNGFAST)
 	{
@@ -1855,7 +1898,17 @@ static ssize_t synaptics_rmi4_baseline_data(char *buf, bool savefile)
 		rx2rx_upper_limit = DiagonalUpperLimit_YOUNGFAST;
 		raw_cap_data = (const int16_t *)raw_cap_data_youngfast;
 		iCbcDataSize = sizeof(raw_cap_data_youngfast);
+#ifdef CONFIG_OPPO_DEVICE_N3
+	} else if (syna_ts_data->vendor_id == TP_VENDOR_TPK_GFF) {
+		tx_num = TX_NUM_TPK_GFF_N3;
+		rx_num = RX_NUM_TPK_GFF_N3;
+		rx2rx_lower_limit = DiagonalLowerLimit_TPK;
+		rx2rx_upper_limit = DiagonalUpperLimit_TPK;
+		raw_cap_data = (const int16_t *)raw_cap_data_tpk_gff_N3;
+		iCbcDataSize = sizeof(raw_cap_data_tpk_gff_N3);
+#endif
 	}
+
 	if (tx_num == 0 || rx_num == 0 || raw_cap_data == NULL
 			|| rx2rx_lower_limit == 0 || rx2rx_upper_limit == 0 || tx_num > rx_num)
 	{
@@ -2084,125 +2137,190 @@ static ssize_t synaptics_rmi4_baseline_data(char *buf, bool savefile)
 
 	}
 
-	//Step3 : Check trx-to-trx ,short test
+//Step3 : Check trx-to-trx ,short test
 	print_ts(TS_DEBUG, "-------------------Step 3 : Check trx-to-trx--------------------- \n");
 
-	tmp_new = 1;// software reset TP
-	synaptics_rmi4_i2c_write(syna_ts_data,syna_ts_data->f01_cmd_base_addr,(unsigned char*)&tmp_new,1);
+	tmp_new = 1; // software reset TP
+	synaptics_rmi4_i2c_write(syna_ts_data, syna_ts_data->f01_cmd_base_addr, (unsigned char*)&tmp_new, 1);
 	msleep(150);
 
-	tmp_new = 26 ;
-	synaptics_rmi4_i2c_write(syna_ts_data,F54_DATA_BASE_ADDR,	(unsigned char*)&tmp_new,1); //select report type 0x26
+	tmp_new = 26;
+	synaptics_rmi4_i2c_write(syna_ts_data, F54_DATA_BASE_ADDR, (unsigned char*)&tmp_new, 1); //select report type 0x26
 
-	tmp_new = 0 ;
-	data_buf[0] = 0 ;
-	data_buf[1] = 0 ;
-	synaptics_rmi4_i2c_write(syna_ts_data,F54_DATA_BASE_ADDR+1,	(unsigned char*)data_buf,2);
-	tmp_new = 1 ;
-	synaptics_rmi4_i2c_write(syna_ts_data,F54_CMD_BASE_ADDR,	(unsigned char*)&tmp_new,1); //get report
+	tmp_new = 0;
+	data_buf[0] = 0;
+	data_buf[1] = 0;
+	synaptics_rmi4_i2c_write(syna_ts_data,F54_DATA_BASE_ADDR + 1, (unsigned char*)data_buf, 2);
+	tmp_new = 1;
+	synaptics_rmi4_i2c_write(syna_ts_data,F54_CMD_BASE_ADDR, (unsigned char*)&tmp_new, 1); //get report
 	wait_test_cmd_finished();
 
-	x = 0 ;
-	y = synaptics_rmi4_i2c_read(syna_ts_data, F54_DATA_BASE_ADDR+3, data_buf,7) ;
-	for(i=0; i < 7 && y >= 0; i++) 
-	{
-		if(data_buf[i]) {
-			print_ts(TS_DEBUG, "Not in range!! value[%d]=0x%x\n",i,data_buf[i]);
-			x ++ ;
-			error_count ++;
+	y = synaptics_rmi4_i2c_read(syna_ts_data, F54_DATA_BASE_ADDR + 3, data_buf, 7) ;
+	print_ts(TS_DEBUG," trx-to-trx raw readback: %x  %x  %x  %x  %x  %x \n", data_buf[0], data_buf[1], data_buf[2], data_buf[3], data_buf[4], data_buf[5]);
+	num_read_chars += sprintf(&(buf[num_read_chars]), " trx-to-trx raw readback: %x  %x  %x  %x  %x  %x \n", data_buf[0], data_buf[1], data_buf[2], data_buf[3], data_buf[4], data_buf[5]);
+#if defined(CONFIG_MACH_FIND7) || defined(CONFIG_MACH_FIND7WX)
+	//mingqiang.guo@phone.bsp 2014-5-30  modify  must clear not use channel , other it will wrong
+	if (get_pcb_version() <= HW_VERSION__20) { //find7
+		if ((data_buf[0] == 0) && (data_buf[1] == 0) && (data_buf[2] == 0)
+			&& ((data_buf[3] & 0x0f) == 0) && ((data_buf[5] & 0x7f) == 0)) {
+			if ((syna_ts_data->vendor_id == TP_VENDOR_TPK) && (data_buf[4] == 0))
+				print_ts(TS_DEBUG, "tpk trx-to-trx test  tpk pass.\n");
+			else if ((syna_ts_data->vendor_id == TP_VENDOR_WINTEK) && ((data_buf[4] & 0xfe) == 0))
+				print_ts(TS_DEBUG, "wintek trx-to-trx test wintek pass.\n");
+			else {
+				if (syna_ts_data->vendor_id == TP_VENDOR_TPK) {
+					print_ts(TS_DEBUG, " tpk trx-to-trx test error: data_buf[4] = %x   error \n", data_buf[4]);
+					num_read_chars += sprintf(&(buf[num_read_chars]), "tpk  trx-to-trx test error: data_buf[4] = %x   error \n", data_buf[4]);
+					error_count++;
+				} else {
+					print_ts(TS_DEBUG, " wintek trx-to-trx test error: data_buf[4] & 0xfe  = %x   error \n", data_buf[4]&0xfe);
+					num_read_chars += sprintf(&(buf[num_read_chars]), "wintek  trx-to-trx test error: data_buf[4] & 0xfe  = %x   error \n", data_buf[4]&0xfe);
+					error_count++;
+				}
+			}
 		} else {
-			print_ts(TS_DEBUG, "pass.\n");
+			print_ts(TS_DEBUG," trx-to-trx test error: data_buf[3]&0x0f =%x data_buf[5]&0x7f=%x \n", data_buf[3] & 0x0f, data_buf[5] & 0x7f) ;
+			num_read_chars += sprintf(&(buf[num_read_chars]), " trx-to-trx test error: data_buf[3]&0x0f =%x data_buf[5]&0x7f=%x \n", data_buf[3] & 0x0f, data_buf[5] & 0x7f);
+			error_count++;
+		}
+	} else { //find7s
+		if ((data_buf[0] == 0) && (data_buf[1] == 0) && (data_buf[2] == 0)
+				&& ((data_buf[3] & 0x07) == 0) && (data_buf[4] == 0) && ((data_buf[5] & 0x3f) == 0)) {
+			print_ts(TS_DEBUG, " trx-to-trx test pass.\n");
+		} else {
+			print_ts(TS_DEBUG, " trx-to-trx test error: data_buf[3]&0x07 =%x data_buf[5]&0x3f=%x \n", data_buf[3] & 0x07, data_buf[5] & 0x3f);
+			num_read_chars += sprintf(&(buf[num_read_chars]), " trx-to-trx test error: data_buf[3]&0x07 =%x data_buf[5]&0x3f=%x \n", data_buf[3] & 0x07, data_buf[5] & 0x3f);
+			error_count++;
 		}
 	}
-	if(x > 0) {
-		num_read_chars += sprintf(&(buf[num_read_chars]), " TRx To TRx Short Test Failed[%d]!\n",x);
-		//goto END_TP_TEST;
+#elif defined CONFIG_OPPO_DEVICE_N3
+	if( ((data_buf[0]&0x7e)==0) && ((data_buf[1]&0x7f)==0) && ((data_buf[2]&0xfb)==0)
+		&&(data_buf[3]==0) && ((data_buf[4]&0xfe)==0) && (data_buf[5]==0) ) {
+		print_ts(TS_DEBUG, " trx-to-trx test pass.\n");
+	} else {
+		print_ts(TS_ERROR," trx-to-trx test error: data_buf[3]&0x07 =%x data_buf[5]&0x3f=%x \n",data_buf[3]&0x07,data_buf[5]&0x3f) ;
+		num_read_chars += sprintf(&(buf[num_read_chars]), " trx-to-trx test error: data_buf[3]&0x07 =%x data_buf[5]&0x3f=%x \n",data_buf[3]&0x07,data_buf[5]&0x3f) ;
+		error_count ++;
 	}
+#else /* defined(CONFIG_MACH_FIND7) || defined(CONFIG_MACH_FIND7WX) */
+	if ((data_buf[0] == 0) && (data_buf[1] == 0) && (data_buf[2] == 0)
+		&& ((data_buf[3] & 0x07) == 0) && (data_buf[4] == 0) && ((data_buf[5] & 0x3f) == 0)) {
+		print_ts(TS_DEBUG, " trx-to-trx test pass.\n");
+	} else {
+		print_ts(TS_DEBUG, " trx-to-trx test error: data_buf[3]&0x07 =%x data_buf[5]&0x3f=%x \n", data_buf[3] & 0x07, data_buf[5] & 0x3f);
+		num_read_chars += sprintf(&(buf[num_read_chars]), " trx-to-trx test error: data_buf[3]&0x07 =%x data_buf[5]&0x3f=%x \n", data_buf[3] &0x07, data_buf[5] & 0x3f);
+		error_count++;
+	}
+#endif /* defined(CONFIG_MACH_FIND7) || defined(CONFIG_MACH_FIND7WX) */
 
-	//Step4 : Check trx-to-ground 
+	//Step4 : Check trx-to-ground
 	print_ts(TS_DEBUG, "-------------------step 4 : Check trx-to-ground--------------------- \n");
 
-	tmp_new = 1;// software reset TP
-	synaptics_rmi4_i2c_write(syna_ts_data,syna_ts_data->f01_cmd_base_addr,(unsigned char*)&tmp_new,1);
+	tmp_new = 1; // software reset TP
+	synaptics_rmi4_i2c_write(syna_ts_data, syna_ts_data->f01_cmd_base_addr, (unsigned char*)&tmp_new, 1);
 	msleep(150);
 
-	tmp_new = 25 ;
-	synaptics_rmi4_i2c_write(syna_ts_data,F54_DATA_BASE_ADDR,	(unsigned char*)&tmp_new,1); //select report type 0x25
+	tmp_new = 25;
+	synaptics_rmi4_i2c_write(syna_ts_data, F54_DATA_BASE_ADDR, (unsigned char*)&tmp_new, 1); //select report type 0x25
 
-	tmp_new = 0 ;
-	data_buf[0] = 0 ;
-	data_buf[1] = 0 ;
-	synaptics_rmi4_i2c_write(syna_ts_data,F54_DATA_BASE_ADDR+1,	(unsigned char*)data_buf,2);
-	tmp_new = 1 ;
-	synaptics_rmi4_i2c_write(syna_ts_data,F54_CMD_BASE_ADDR,	(unsigned char*)&tmp_new,1); //get report
+	tmp_new = 0;
+	data_buf[0] = 0;
+	data_buf[1] = 0;
+	synaptics_rmi4_i2c_write(syna_ts_data, F54_DATA_BASE_ADDR + 1, (unsigned char*)data_buf, 2);
+	tmp_new = 1;
+	synaptics_rmi4_i2c_write(syna_ts_data,F54_CMD_BASE_ADDR, (unsigned char*)&tmp_new, 1); //get report
 	wait_test_cmd_finished();
 
-	y = synaptics_rmi4_i2c_read(syna_ts_data, F54_DATA_BASE_ADDR+3, data_buf,7) ;
+	y = synaptics_rmi4_i2c_read(syna_ts_data, F54_DATA_BASE_ADDR + 3, data_buf, 7);
 
-	for(i=0; i < 7; i++) 
-	{
+	for (i = 0; i < 7; i++) {
 		print_ts(TS_DEBUG, "========!! value[%d]=0x%x\n",i,data_buf[i]);
 	}
-#ifdef CONFIG_VENDOR_EDIT
-//qiao.hu @EXP.Basic.drv,2014/5/20 modified for touchscreen
-#if defined (CONFIG_OPPO_DEVICE_FIND7) || defined (CONFIG_OPPO_DEVICE_FIND7WX)
+//qiao.hu @EXP.Basic.drv,2014/5/20 modified for touchscreen 
+#if defined (CONFIG_OPPO_DEVICE_FIND7) || defined (CONFIG_OPPO_DEVICE_FIND7WX) 
 
 	//mingqiang.guo@phone.bsp modify  only 13077 wintk and tpk use different channels,  tpk: data_buf[4]==0xff wintek :  data_buf[4]==0xfe
-	print_ts(TS_DEBUG, "%d: syna_ts_data->vendor_id=%d,data_buf[4]=%d\n",__LINE__,syna_ts_data->vendor_id,data_buf[4]);
+	print_ts(TS_DEBUG, "%d: syna_ts_data->vendor_id=%d,data_buf[4]=%d\n", __LINE__, syna_ts_data->vendor_id, data_buf[4]);
 
-	if (get_pcb_version() <= HW_VERSION__20)  //find7
-	{
-		if((data_buf[0]==0xff) && (data_buf[1]==0xff) && (data_buf[2]==0xff)
-				&&((data_buf[3]&0x0f) == 0x0f)  && ((data_buf[5]&0x7f) == 0x7f) )
-		{
-			if( (syna_ts_data->vendor_id == TP_VENDOR_TPK) && (data_buf[4]==0xff) )
+	if (get_pcb_version() <= HW_VERSION__20) { //find7
+		if ((data_buf[0] == 0xff) && (data_buf[1] == 0xff) && (data_buf[2] == 0xff)
+			&& ((data_buf[3] & 0x0f) == 0x0f)  && ((data_buf[5] & 0x7f) == 0x7f)) {
+			if ((syna_ts_data->vendor_id == TP_VENDOR_TPK) && (data_buf[4] == 0xff))
 				print_ts(TS_DEBUG, "pass.\n");
-			else if( (syna_ts_data->vendor_id == TP_VENDOR_WINTEK) && ((data_buf[4]&0xfe) == 0xfe) )
+			else if ((syna_ts_data->vendor_id == TP_VENDOR_WINTEK) && ((data_buf[4] & 0xfe) == 0xfe))
 				print_ts(TS_DEBUG, "pass.\n");
-			else
-			{
-				print_ts(6, "%d: syna_ts_data->vendor_id=%d,data_buf[4]=%d\n",__LINE__,syna_ts_data->vendor_id,data_buf[4]);
-				num_read_chars += sprintf(&(buf[num_read_chars]), " trx-to-ground  Test Failed [%d]\n",__LINE__);
-				error_count ++;
+			else {
+				print_ts(6, "%d: syna_ts_data->vendor_id=%d,data_buf[4]=%d\n", __LINE__, syna_ts_data->vendor_id, data_buf[4]);
+				num_read_chars += sprintf(&(buf[num_read_chars]), " trx-to-ground  Test Failed [%d]\n", __LINE__);
+				error_count++;
 			}
-		}
-		else
-		{
-			print_ts(6, "%d: syna_ts_data->vendor_id=%d,data_buf[4]=%d\n",__LINE__,syna_ts_data->vendor_id,data_buf[4]);
+		} else {
+			print_ts(6, "%d: syna_ts_data->vendor_id=%d,data_buf[4]=%d\n", __LINE__, syna_ts_data->vendor_id, data_buf[4]);
 			num_read_chars += sprintf(&(buf[num_read_chars]), " trx-to-ground Failed [%d]\n",__LINE__);
-			error_count ++;
+			error_count++;
+		}
+	} else { //find7s
+		if ((data_buf[0] == 0xff) && (data_buf[1] == 0xff) && (data_buf[2] == 0xff)
+			&& ((data_buf[3] & 0x07) == 0x7)&& (data_buf[4] == 0xff) && ((data_buf[5] & 0x3f) == 0x3f)) {
+				print_ts(TS_DEBUG, "pass.\n");
+		} else {
+			print_ts(6, "%d: syna_ts_data->vendor_id=%d,data_buf[4]=%d\n", __LINE__, syna_ts_data->vendor_id, data_buf[4]);
+			num_read_chars += sprintf(&(buf[num_read_chars]), " trx-to-ground test Failed[%d]\n", __LINE__);
+			error_count++;
 		}
 	}
-	else  //find7s
-	{
-		if((data_buf[0]==0xff) && (data_buf[1]==0xff) && (data_buf[2]==0xff)
-			&&( (data_buf[3]&0x07)==0x7)  && (data_buf[4]==0xff) && ( (data_buf[5]&0x3f)==0x3f)  )
-			{
-				print_ts(TS_DEBUG, "pass.\n");
-			}
-		else 
-		{
-			print_ts(6, "%d: syna_ts_data->vendor_id=%d,data_buf[4]=%d\n",__LINE__,syna_ts_data->vendor_id,data_buf[4]);
+#elif defined CONFIG_OPPO_DEVICE_N3
+	if (syna_ts_data->vendor_id == TP_VENDOR_WINTEK) {
+		if( ((data_buf[0]&0x7e)==0x7e) && ((data_buf[1]&0x7f)==0x7f) && ((data_buf[2]&0xfb)==0xfb)
+			&&(data_buf[3]==0xff) && ((data_buf[4]&0xfe)==0xfe) && (data_buf[5]==0xff) ) {
+			print_ts(TS_DEBUG, "pass.\n");
+		} else {
+			print_ts(TS_ERROR, "%d: syna_ts_data->vendor_id=%d,data_buf[4]=%d\n",__LINE__,syna_ts_data->vendor_id,data_buf[4]);
+			print_ts(TS_ERROR, " trx-to-ground  Test Failed [%d]\n",__LINE__);
+			num_read_chars += sprintf(&(buf[num_read_chars]), " trx-to-ground test Failed[%d]\n",__LINE__);
+			error_count ++;
+		}
+	} else if (syna_ts_data->vendor_id == TP_VENDOR_TPK) {
+		if((data_buf[0]==0xff) && (data_buf[1]==0xff) && ((data_buf[2]&0x3a)==0x3a)
+			&&((data_buf[3]&0x7e)==0x7e) && ((data_buf[4]&0xbd)==0xbd) && ((data_buf[5]&0x7e)==0x7e) ) {
+			print_ts(TS_DEBUG, "pass.\n");
+		} else {
+			print_ts(TS_ERROR, "%d: syna_ts_data->vendor_id=%d,data_buf[4]=%d\n",__LINE__,syna_ts_data->vendor_id,data_buf[4]);
+			print_ts(TS_ERROR, " trx-to-ground  Test Failed [%d]\n",__LINE__);
+			num_read_chars += sprintf(&(buf[num_read_chars]), " trx-to-ground test Failed[%d]\n",__LINE__);
+			error_count ++;
+		}
+	} else if (syna_ts_data->vendor_id == TP_VENDOR_TRULY) {
+		if(((data_buf[0]&0xee)==0xee) && ((data_buf[1]&0xfb)==0xfb) && ((data_buf[2]&0xaa)==0xaa)
+			&&((data_buf[3]&0xfd)==0xfd) && ((data_buf[4]&0xf9)==0xf9) && ((data_buf[5]&0xff)==0xff) ) {
+			print_ts(TS_DEBUG, "pass.\n");
+		} else {
+			print_ts(TS_ERROR, "%d: syna_ts_data->vendor_id=%d,data_buf[4]=%d\n",__LINE__,syna_ts_data->vendor_id,data_buf[4]);
+			print_ts(TS_ERROR, " trx-to-ground  Test Failed [%d]\n",__LINE__);
+			num_read_chars += sprintf(&(buf[num_read_chars]), " trx-to-ground test Failed[%d]\n",__LINE__);
+			error_count ++;
+		}
+	} else if (syna_ts_data->vendor_id == TP_VENDOR_TPK_GFF) {
+		if((data_buf[0]==0xff) && ((data_buf[1]&0xdf)==0xdf) && ((data_buf[2]&0x3a)==0x3a)
+			&&((data_buf[3]&0x7e)==0x7e) && ((data_buf[4]&0xbd)==0xbd) && ((data_buf[5]&0x7e)==0x7e) ) {
+			print_ts(TS_DEBUG, "pass.\n");
+		} else {
+			print_ts(TS_ERROR, "%d: syna_ts_data->vendor_id=%d,data_buf[4]=%d\n",__LINE__,syna_ts_data->vendor_id,data_buf[4]);
+			print_ts(TS_ERROR, " trx-to-ground  Test Failed [%d]\n",__LINE__);
 			num_read_chars += sprintf(&(buf[num_read_chars]), " trx-to-ground test Failed[%d]\n",__LINE__);
 			error_count ++;
 		}
 	}
-#else /* CONFIG_OPPO_DEVICE_FIND7) || defined (CONFIG_OPPO_DEVICE_FIND7WX */
-	if((data_buf[0]==0xff) && (data_buf[1]==0xff) && (data_buf[2]==0xff)
-			//&&(data_buf[3]==0xf)  && (data_buf[4]==0xff) && (data_buf[5]==0x7f) && (data_buf[6]==0x0)  )
-			&&( (data_buf[3]&0x07)==0x7)  && (data_buf[4]==0xff) && ( (data_buf[5]&0x3f)==0x3f)  )
-	{
+#else /* defined(CONFIG_MACH_FIND7) || defined(CONFIG_MACH_FIND7WX) */
+	if ((data_buf[0] == 0xff) && (data_buf[1] == 0xff) && (data_buf[2] == 0xff)
+			&& ((data_buf[3] & 0x07) == 0x7)  && (data_buf[4] == 0xff) && ((data_buf[5] & 0x3f) == 0x3f)) {
 		print_ts(TS_DEBUG, "pass.\n");
+	} else {
+		print_ts(6, "%d: syna_ts_data->vendor_id=%d,data_buf[4]=%d\n", __LINE__, syna_ts_data->vendor_id, data_buf[4]);
+		num_read_chars += sprintf(&(buf[num_read_chars]), " trx-to-ground test Failed[%d]\n", __LINE__);
+		error_count++;
 	}
-	else
-	{
-		print_ts(6, "%d: syna_ts_data->vendor_id=%d,data_buf[4]=%d\n",__LINE__,syna_ts_data->vendor_id,data_buf[4]);
-		num_read_chars += sprintf(&(buf[num_read_chars]), " trx-to-ground test Failed[%d]\n",__LINE__);
-		error_count ++;
-	}
-#endif /*CONFIG_OPPO_DEVICE_FIND7) || defined (CONFIG_OPPO_DEVICE_FIND7WX */
-#endif //VENDOR_EDIT
-
+#endif /* defined(CONFIG_MACH_FIND7) || defined(CONFIG_MACH_FIND7WX) */
 
 	//step 5:reset touchpanel and reconfig the device
 END_TP_TEST:
@@ -2585,6 +2703,7 @@ static int synaptics_rmi4_f12_abs_report(struct synaptics_rmi4_data *rmi4_data,
 				SYNA_ADDR_GESTURE_EXT,
 				gestureext,
 				sizeof(gestureext));
+
 		if(gesture[0]) {
 			keyvalue = synaptics_rmi4_update_gesture2(gesture,gestureext);
 			if(syna_use_gesture2 && keyvalue)
@@ -2595,11 +2714,16 @@ static int synaptics_rmi4_f12_abs_report(struct synaptics_rmi4_data *rmi4_data,
 				input_report_key(rmi4_data->input_dev, keyvalue, 0);
 				input_sync(rmi4_data->input_dev);
 			}
-			print_ts(TS_ERROR, KERN_ERR "[syna]gesture: %2x %2x %2x %2x %2x\n",gesture[0],gesture[1],gesture[2],gesture[3],gesture[4]);
+			print_ts(TS_DEBUG, KERN_ERR "[syna]gesture: %2x %2x %2x %2x %2x\n",gesture[0],gesture[1],gesture[2],gesture[3],gesture[4]);
 			print_ts(TS_DEBUG, KERN_ERR "[syna]gestureext: %2x %2x %2x %2x %2x %2x %2x %2x %2x\n",
 					gestureext[0],gestureext[1],gestureext[2],gestureext[3],gestureext[4],gestureext[5],gestureext[6],gestureext[7],gestureext[24]);
 		}
 	}
+
+#ifdef CONFIG_OPPO_DEVICE_N3
+	if(atomic_read(&key_is_touched))
+		return touch_count;
+#endif
 
 	//check pdoze status
 	if(rmi4_data->pdoze_enable) {
@@ -2653,7 +2777,7 @@ static int synaptics_rmi4_f12_abs_report(struct synaptics_rmi4_data *rmi4_data,
 				y = rmi4_data->sensor_max_y - y;
 
 			{
-				int pressed_vkey = get_virtual_key_button(x, y);
+				int pressed_vkey = get_virtual_key_button(rmi4_data, x, y);
 				if (pressed_vkey == TP_VKEY_NONE)
 				{
 					continue;
@@ -2876,6 +3000,66 @@ static void synaptics_rmi4_report_touch(struct synaptics_rmi4_data *rmi4_data,
 	return;
 }
 
+#ifdef CONFIG_OPPO_DEVICE_N3
+static void tpd_down(struct synaptics_rmi4_data *rmi4_data,int raw_x, int raw_y, int x, int y, int p)
+{
+	if(rmi4_data && rmi4_data->input_dev) {
+		input_mt_slot(rmi4_data->input_dev, 0);
+		input_mt_report_slot_state(rmi4_data->input_dev, MT_TOOL_FINGER, 1);
+
+		input_report_key(rmi4_data->input_dev, BTN_TOUCH, 1);
+		input_report_key(rmi4_data->input_dev, BTN_TOOL_FINGER, 1);
+
+		input_report_abs(rmi4_data->input_dev, ABS_MT_TOUCH_MAJOR, p);
+		input_report_abs(rmi4_data->input_dev, ABS_MT_WIDTH_MAJOR, (raw_x+raw_y)/2);
+		input_report_abs(rmi4_data->input_dev, ABS_MT_POSITION_X, x);
+		input_report_abs(rmi4_data->input_dev, ABS_MT_POSITION_Y, y);
+	}
+}
+
+static void tpd_up(struct synaptics_rmi4_data *rmi4_data,int raw_x, int raw_y, int x, int y, int p)
+{
+	if(rmi4_data && rmi4_data->input_dev) {
+		input_mt_slot(rmi4_data->input_dev, 0);
+		input_mt_report_slot_state(rmi4_data->input_dev, MT_TOOL_FINGER, 0);
+
+		input_report_key(rmi4_data->input_dev, BTN_TOUCH, 0);
+		input_report_key(rmi4_data->input_dev, BTN_TOOL_FINGER, 0);
+	}
+}
+
+static void int_key_report(struct synaptics_rmi4_data *rmi4_data)
+{
+	int ret= 0;
+	int F1A_0D_DATA00=0x0;
+	i2c_smbus_write_byte_data(rmi4_data->i2c_client, 0xff, 0x2);
+	ret = i2c_smbus_read_byte_data(rmi4_data->i2c_client, F1A_0D_DATA00);
+
+	if((ret&0x07)!=0) {
+		atomic_set(&key_is_touched,1);
+
+		print_ts(TS_DEBUG,"F1A_0D_DATA00 is 0x%x\n",ret);
+
+		if(ret&0x01) // menu
+			tpd_down(rmi4_data, 40, 20, rmi4_data->sensor_max_x/6, 2120, 44);
+
+		if(ret&0x02) // home
+			tpd_down(rmi4_data, 40, 20, rmi4_data->sensor_max_x/2, 2120, 44);
+
+		if(ret&0x04) // back
+			tpd_down(rmi4_data, 40, 20, rmi4_data->sensor_max_x*5/6, 2120, 44);
+	} else {
+		print_ts(TS_DEBUG,"virtual key_up\n");
+
+		atomic_set(&key_is_touched,0);
+		tpd_up(rmi4_data, 0, 0, 0, 0, 0);
+	}
+
+	input_sync(rmi4_data->input_dev);
+	i2c_smbus_write_byte_data(rmi4_data->i2c_client, 0xff, 0x0);
+}
+#endif
+
 /**
  * synaptics_rmi4_sensor_report()
  *
@@ -2894,6 +3078,9 @@ static void synaptics_rmi4_sensor_report(struct synaptics_rmi4_data *rmi4_data)
 	struct synaptics_rmi4_fn *fhandler;
 	struct synaptics_rmi4_exp_fn *exp_fhandler;
 	struct synaptics_rmi4_device_info *rmi;
+#ifdef CONFIG_OPPO_DEVICE_N3
+    char gesture_0d;
+#endif
 
 	rmi = &(rmi4_data->rmi4_mod_info);
 
@@ -2928,6 +3115,9 @@ static void synaptics_rmi4_sensor_report(struct synaptics_rmi4_data *rmi4_data)
 	 * Traverse the function handler list and service the source(s)
 	 * of the interrupt accordingly.
 	 */
+#ifdef CONFIG_OPPO_DEVICE_N3
+	if(data[1] & 0x04) {
+#endif
 	if (!list_empty(&rmi->support_fn_list)) {
 		list_for_each_entry(fhandler, &rmi->support_fn_list, link) {
 			if (fhandler == NULL)
@@ -2941,7 +3131,27 @@ static void synaptics_rmi4_sensor_report(struct synaptics_rmi4_data *rmi4_data)
 			}
 		}
 	}
+#ifdef CONFIG_OPPO_DEVICE_N3
+	}
+	if(data[1] &0x10) {
+        if(rmi4_data->gesture) // tp gesture , double tap virtual key area
+        {
+            retval = synaptics_rmi4_i2c_read(rmi4_data, SYNA_ADDR_F1A_0D_DATA02, &gesture_0d, sizeof(gesture_0d));
 
+            print_ts(TS_DEBUG, "Gesture Double tap (gesture_0d = 0x%x) \n", gesture_0d);
+
+            syna_rmi4_data->gesturemode = DouTap; // double tap 
+
+            input_report_key(rmi4_data->input_dev, KEY_F4, 1);
+            input_sync(rmi4_data->input_dev);
+            input_report_key(rmi4_data->input_dev, KEY_F4, 0);
+            input_sync(rmi4_data->input_dev);            
+        }
+
+		if (!rmi4_data->button_disable)
+			int_key_report(rmi4_data);
+	}
+#endif
 	mutex_lock(&exp_data.mutex);
 	if (!list_empty(&exp_data.list)) {
 		list_for_each_entry(exp_fhandler, &exp_data.list, link) {
@@ -3926,12 +4136,24 @@ static void synaptics_rmi4_set_params(struct synaptics_rmi4_data *rmi4_data)
 	set_bit(KEY_POWER, rmi4_data->input_dev->keybit);
 	synaptics_ts_init_virtual_key(rmi4_data) ;
 
+#ifdef CONFIG_OPPO_DEVICE_N3
+	rmi4_data->sensor_max_x = 1080; // sometimes , the value of sensor_max_x(y) we read from registers is wrong.
+	rmi4_data->sensor_max_y = 1920;
+
+	input_set_abs_params(rmi4_data->input_dev,
+			ABS_MT_POSITION_X, rmi4_data->snap_left,
+			rmi4_data->sensor_max_x-rmi4_data->snap_right, 0, 0);
+	input_set_abs_params(rmi4_data->input_dev,
+			ABS_MT_POSITION_Y, rmi4_data->snap_top,
+			rmi4_data->sensor_max_y-rmi4_data->snap_bottom, 0, 0);
+#else
 	input_set_abs_params(rmi4_data->input_dev,
 			ABS_MT_POSITION_X, rmi4_data->snap_left,
 			rmi4_data->sensor_max_x-rmi4_data->snap_right, 0, 0);
 	input_set_abs_params(rmi4_data->input_dev,
 			ABS_MT_POSITION_Y, rmi4_data->snap_top,
 			rmi4_data->sensor_max_y-rmi4_data->virtual_key_height-rmi4_data->snap_bottom, 0, 0);
+#endif
 #ifdef REPORT_2D_W
 	input_set_abs_params(rmi4_data->input_dev,
 			ABS_MT_TOUCH_MAJOR, 0,
@@ -4278,6 +4500,21 @@ int synaptics_rmi4_get_vendorid2(int id1, int id2, int id3) {
 	return 0 ;	
 }
 
+#ifdef CONFIG_OPPO_DEVICE_N3
+int synaptics_rmi4_get_vendorid3(int id1, int id2, int id3) {
+    if(id1 == 0 && id2 == 0 ) 
+        return TP_VENDOR_TPK ;
+    else if(id1 == 1 && id2 == 0 )
+        return TP_VENDOR_WINTEK ;
+    else if(id1 == 0 && id2 == 1 )
+        return TP_VENDOR_TRULY ;
+    else if(id1 == 1 && id2 == 1 )
+        return TP_VENDOR_TPK_GFF ;
+
+    return 0 ;	
+}
+#endif
+
 //return firmware version and string
 extern int synaptics_rmi4_get_firmware_version(int vendor, int lcd_type);
 
@@ -4313,16 +4550,18 @@ static void synaptics_rmi4_get_vendorid(struct synaptics_rmi4_data *rmi4_data) {
 
 #ifdef CONFIG_OPPO_DEVICE_FIND7OP
 	vendor_id = synaptics_rmi4_get_vendorid1(gpio_get_value(rmi4_data->id_gpio),gpio_get_value(rmi4_data->wakeup_gpio),0);
-#else
-	if (get_pcb_version() >= HW_VERSION__21)
+#elif defined CONFIG_OPPO_DEVICE_FIND7
+	if (get_pcb_version() >= HW_VERSION__20)
 		vendor_id = synaptics_rmi4_get_vendorid1(gpio_get_value(rmi4_data->id_gpio),gpio_get_value(rmi4_data->wakeup_gpio),0);
 	else
 		vendor_id = synaptics_rmi4_get_vendorid2(gpio_get_value(rmi4_data->id_gpio),gpio_get_value(rmi4_data->wakeup_gpio),0);
+#elif defined CONFIG_OPPO_DEVICE_N3
+    vendor_id = synaptics_rmi4_get_vendorid3(gpio_get_value(rmi4_data->id_gpio),gpio_get_value(rmi4_data->wakeup_gpio),0);
 #endif
 
 	rmi4_data->vendor_id = vendor_id;
 	synaptics_rmi4_get_vendorstring(rmi4_data->vendor_id, lcd_type_id);
-	print_ts(TS_INFO, KERN_ERR "[syna] vendor id: %x version: %s\n", vendor_id, synaptics_vendor_str);
+	print_ts(TS_INFO, KERN_ERR "[syna] pcb_version: %d vendor id: %x version: %s\n", get_pcb_version(), vendor_id, synaptics_vendor_str);
 
 }
 
@@ -4417,21 +4656,27 @@ static int __devinit synaptics_rmi4_probe(struct i2c_client *client,
 	rmi4_data->sensor_sleep = false;
 	rmi4_data->irq_enabled = false;
 	rmi4_data->fingers_on_2d = false;
+	rmi4_data->button_disable = false;
 
 	rmi4_data->i2c_read = synaptics_rmi4_i2c_read;
 	rmi4_data->i2c_write = synaptics_rmi4_i2c_write;
 	rmi4_data->irq_enable = synaptics_rmi4_irq_enable;
 	rmi4_data->reset_device = synaptics_rmi4_reset_device;
 
-	//init sensor size
-	if (get_pcb_version() <= HW_VERSION__20) {
+//init sensor size
+#ifdef CONFIG_OPPO_DEVICE_N3
+    rmi4_data->virtual_key_height = 114;
+    rmi4_data->sensor_max_x = LCD_MAX_X ;
+    rmi4_data->sensor_max_y = LCD_MAX_Y+120 ;
+    syna_lcd_ratio1 = 100 ;
+    syna_lcd_ratio2 = 100 ;
+#else
+	if (get_pcb_version() < HW_VERSION__20) {
 		rmi4_data->virtual_key_height = 114;
 		rmi4_data->sensor_max_x = LCD_MAX_X ;
 		rmi4_data->sensor_max_y = LCD_MAX_Y+120 ;
 		syna_lcd_ratio1 = 100 ;
 		syna_lcd_ratio2 = 100 ;
-		if(get_pcb_version() == HW_VERSION__20)
-			syna_lcd_ratio1 = 135 ;
 	} else {
 		rmi4_data->virtual_key_height = 142;
 		rmi4_data->sensor_max_x = LCD_MAX_X_FIND7S ;
@@ -4440,7 +4685,7 @@ static int __devinit synaptics_rmi4_probe(struct i2c_client *client,
 		syna_lcd_ratio2 = 100 ;
 
 	}
-
+#endif
 	mutex_init(&(rmi4_data->rmi4_io_ctrl_mutex));
 	mutex_init(&(rmi4_data->rmi4_reset_mutex));
 
@@ -4458,6 +4703,11 @@ static int __devinit synaptics_rmi4_probe(struct i2c_client *client,
 			goto err_set_input_dev;
 	}
 	rmi4_data->regulator = vdd_regulator ;
+
+#ifdef CONFIG_OPPO_DEVICE_N3
+	atomic_set(&key_is_touched, 0);
+#endif
+
 	retval = synaptics_init_gpio(rmi4_data);
 	if (retval)
 	{
@@ -4865,6 +5115,10 @@ static int synaptics_rmi4_suspend(struct device *dev)
 
 	rmi4_data->pwrrunning = true ;
 
+#ifdef CONFIG_OPPO_DEVICE_N3
+	atomic_set(&key_is_touched, 0);
+#endif
+
 	if(rmi4_data->smartcover_enable)
 	    synaptics_rmi4_close_smartcover();
 
@@ -4874,7 +5128,7 @@ static int synaptics_rmi4_suspend(struct device *dev)
 	synaptics_enable_gesture(rmi4_data,true);
 	synaptics_enable_pdoze(rmi4_data,true);
 
-	if(rmi4_data->gesture || rmi4_data->pdoze_enable) {
+	if((rmi4_data->gesture && syna_use_gesture) || rmi4_data->pdoze_enable) {
 		synaptics_enable_irqwake(rmi4_data,true);
 		rmi4_data->pwrrunning = false ;
 		return 0;
@@ -4937,12 +5191,11 @@ static int synaptics_rmi4_resume(struct device *dev)
 	if(rmi4_data->glove_enable)
 		synaptics_rmi4_i2c_write(syna_rmi4_data,SYNA_ADDR_GLOVE_FLAG,&val,sizeof(val));
 
-	if(rmi4_data->gesture || rmi4_data->pdoze_enable) {
+	if((rmi4_data->gesture && syna_use_gesture)|| rmi4_data->pdoze_enable) {
 		synaptics_enable_gesture(rmi4_data,false);
 		synaptics_enable_pdoze(rmi4_data,false);
 		synaptics_enable_irqwake(rmi4_data,false);
 		rmi4_data->pwrrunning = false ;
-		synaptics_rmi4_free_fingers(rmi4_data);
 		return 0;
 	}
 

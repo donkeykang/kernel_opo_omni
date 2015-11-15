@@ -99,7 +99,7 @@ static struct notifier_block __refdata lpm_cpu_nblk = {
 };
 
 static uint32_t allowed_l2_mode;
-static uint32_t sysfs_dbg_l2_mode = MSM_SPM_L2_MODE_POWER_COLLAPSE;
+static uint32_t sysfs_dbg_l2_mode __refdata = MSM_SPM_L2_MODE_POWER_COLLAPSE;
 static uint32_t default_l2_mode;
 
 
@@ -981,9 +981,8 @@ static int lpm_system_probe(struct platform_device *pdev)
 			goto fail;
 		}
 
-		if (l->l2_mode == MSM_SPM_L2_MODE_GDHS ||
-				l->l2_mode == MSM_SPM_L2_MODE_POWER_COLLAPSE)
-			l->notify_rpm = true;
+		key = "qcom,send-rpm-sleep-set";
+		l->notify_rpm = of_property_read_bool(node, key);
 
 		if (l->l2_mode >= MSM_SPM_L2_MODE_GDHS)
 			l->sync = true;
@@ -1101,12 +1100,12 @@ fail:
 	return -EFAULT;
 }
 
-static struct of_device_id cpu_modes_mtch_tbl[] = {
+static struct of_device_id cpu_modes_mtch_tbl[] __initdata = {
 	{.compatible = "qcom,cpu-modes"},
 	{},
 };
 
-static struct platform_driver cpu_modes_driver = {
+static struct platform_driver cpu_modes_driver __refdata = {
 	.probe = lpm_cpu_probe,
 	.driver = {
 		.name = "cpu-modes",
@@ -1115,12 +1114,12 @@ static struct platform_driver cpu_modes_driver = {
 	},
 };
 
-static struct of_device_id system_modes_mtch_tbl[] = {
+static struct of_device_id system_modes_mtch_tbl[] __initdata = {
 	{.compatible = "qcom,system-modes"},
 	{},
 };
 
-static struct platform_driver system_modes_driver = {
+static struct platform_driver system_modes_driver __refdata = {
 	.probe = lpm_system_probe,
 	.driver = {
 		.name = "system-modes",
@@ -1129,12 +1128,12 @@ static struct platform_driver system_modes_driver = {
 	},
 };
 
-static struct of_device_id lpm_levels_match_table[] = {
+static struct of_device_id lpm_levels_match_table[] __initdata = {
 	{.compatible = "qcom,lpm-levels"},
 	{},
 };
 
-static struct platform_driver lpm_levels_driver = {
+static struct platform_driver lpm_levels_driver __refdata = {
 	.probe = lpm_probe,
 	.driver = {
 		.name = "lpm-levels",

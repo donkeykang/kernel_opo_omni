@@ -151,7 +151,7 @@ static int mdss_dsi_get_dt_vreg_data(struct device *dev,
 			++mp->num_vreg;
 	}
 #else /*CONFIG_VENDOR_EDIT*/
-	if (get_pcb_version() < HW_VERSION__20) { /* For Find7 */
+	if (!get_pcb_version_find7s()) { /* For Find7 + N3 */
         for_each_child_of_node(of_node, supply_node) {
             if (!strncmp(supply_node->name, "qcom,platform-supply-entry",
                             26))
@@ -186,7 +186,7 @@ static int mdss_dsi_get_dt_vreg_data(struct device *dev,
 			const char *st = NULL;
 #ifdef CONFIG_VENDOR_EDIT
             /* Xinqin.Yang@PhoneSW.Driver, 2014/02/10  Add for Find7S */
-            if (get_pcb_version() >= HW_VERSION__20) {
+            if (get_pcb_version_find7s()){
                 if (!strncmp(supply_node->name, "qcom,platform-supply-entry1", 27)){
                     continue;
                 }
@@ -1424,7 +1424,6 @@ int dsi_panel_device_register(struct device_node *pan_node,
 	int rc, i, len;
 	struct device_node *dsi_ctrl_np = NULL;
 	struct platform_device *ctrl_pdev = NULL;
-	bool dynamic_fps;
 	const char *data;
 	struct mdss_panel_info *pinfo = &(ctrl_pdata->panel_data.panel_info);
 #ifdef CONFIG_VENDOR_EDIT
@@ -1507,49 +1506,6 @@ int dsi_panel_device_register(struct device_node *pan_node,
 	ctrl_pdata->shared_pdata.broadcast_enable = of_property_read_bool(
 		pan_node, "qcom,mdss-dsi-panel-broadcast-mode");
 
-	dynamic_fps = of_property_read_bool(pan_node,
-					  "qcom,mdss-dsi-pan-enable-dynamic-fps");
-	if (dynamic_fps) {
-		pinfo->dynamic_fps = true;
-		data = of_get_property(pan_node,
-					  "qcom,mdss-dsi-pan-fps-update", NULL);
-		if (data) {
-			if (!strcmp(data, "dfps_suspend_resume_mode")) {
-				pinfo->dfps_update =
-						DFPS_SUSPEND_RESUME_MODE;
-				pr_debug("%s: dfps mode: suspend/resume\n",
-								__func__);
-			} else if (!strcmp(data,
-					    "dfps_immediate_clk_mode")) {
-				pinfo->dfps_update =
-						DFPS_IMMEDIATE_CLK_UPDATE_MODE;
-				pr_debug("%s: dfps mode: Immediate clk\n",
-								__func__);
-			} else if (!strcmp(data,
-					    "dfps_immediate_porch_mode")) {
-				pinfo->dfps_update =
-					DFPS_IMMEDIATE_PORCH_UPDATE_MODE;
-				pr_debug("%s: dfps mode: Immediate porch\n",
-								__func__);
-			} else {
-				pr_debug("%s: dfps to default mode\n",
-								__func__);
-				pinfo->dfps_update =
-						DFPS_SUSPEND_RESUME_MODE;
-				pr_debug("%s: dfps mode: suspend/resume\n",
-								__func__);
-			}
-		} else {
-			pr_debug("%s: dfps update mode not configured\n",
-								__func__);
-				pinfo->dynamic_fps =
-								false;
-				pr_debug("%s: dynamic FPS disabled\n",
-								__func__);
-		}
-		pinfo->new_fps = pinfo->mipi.frame_rate;
-	}
-
 	pinfo->panel_max_fps = mdss_panel_get_framerate(pinfo);
 	pinfo->panel_max_vtotal = mdss_panel_get_vtotal(pinfo);
 
@@ -1574,8 +1530,26 @@ int dsi_panel_device_register(struct device_node *pan_node,
 						__func__, __LINE__);
 
 #ifdef CONFIG_VENDOR_EDIT
+#ifdef CONFIG_OPPO_DEVICE_N3
+/* liuyan@Onlinerd.driver, 2014/08/10  Add for 14021 lcd enable */
+		ctrl_pdata->disp_en_gpio76 = of_get_named_gpio(ctrl_pdev->dev.of_node,
+		            "qcom,platform-enable-gpio76", 0);
+		if (!gpio_is_valid(ctrl_pdata->disp_en_gpio76)) {
+		        pr_err("%s:%d, Disp_en gpio 76 not specified\n",
+						__func__, __LINE__);
+		} else {
+			pr_err("config gpio 76 LCD\n");
+			rc = gpio_request(ctrl_pdata->disp_en_gpio76, "disp_enable_gpio76");
+			if (rc) {
+				pr_err("request reset gpio 76 failed, rc=%d\n",
+			               rc);
+				gpio_free(ctrl_pdata->disp_en_gpio76);
+				return -ENODEV;
+			}
+		}
+#else /*CONFIG_VENDOR_EDIT*/
 /* Xiaori.Yuan@Mobile Phone Software Dept.Driver, 2014/03/13  Add for Find7s enable display -5v */
-		if(get_pcb_version() >= HW_VERSION__20){
+		if(get_pcb_version_find7s()){
 			if(gpio_is_valid(46)){
 				pr_err("config gpio 46 LCD -5v \n");
 				rc = gpio_request(46, "LCD_enable_-5v");
@@ -1593,7 +1567,7 @@ int dsi_panel_device_register(struct device_node *pan_node,
 				}
 			}
 		}
-
+#endif
 #endif /*VENDOR_EDIT*/
 	
 		if (pinfo->type == MIPI_CMD_PANEL) {

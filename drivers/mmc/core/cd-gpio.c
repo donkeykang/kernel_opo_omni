@@ -17,6 +17,10 @@
 #include <linux/module.h>
 #include <linux/slab.h>
 
+#ifdef CONFIG_OPPO_DEVICE_N3
+int TF_CARD_STATUS=1;
+#endif
+
 struct mmc_cd_gpio {
 	unsigned int gpio;
 	bool status;
@@ -44,6 +48,9 @@ static irqreturn_t mmc_cd_gpio_irqt(int irq, void *dev_id)
 	int status;
 
 	status = mmc_cd_get_status(host);
+#ifdef CONFIG_OPPO_DEVICE_N3
+	TF_CARD_STATUS = status;
+#endif
 	if (unlikely(status < 0))
 		goto out;
 
@@ -53,6 +60,11 @@ static irqreturn_t mmc_cd_gpio_irqt(int irq, void *dev_id)
 				(host->caps2 & MMC_CAP2_CD_ACTIVE_HIGH) ?
 				"HIGH" : "LOW");
 		cd->status = status;
+
+#ifdef CONFIG_OPPO_DEVICE_N3
+        //Lycan.Wang@Prd.BasicDrv, 2014-07-10 Add for retry 5 times when new sdcard init error
+        host->detect_change_retry = 5;
+#endif /* VENDOR_EDIT */
 
 		/* Schedule a card detection after a debounce timeout */
 		mmc_detect_change(host, msecs_to_jiffies(100));

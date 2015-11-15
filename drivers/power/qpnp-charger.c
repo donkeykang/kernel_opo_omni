@@ -4224,14 +4224,15 @@ qpnp_chg_regulator_boost_enable(struct regulator_dev *rdev)
 			pr_err("failed to write SEC_ACCESS rc=%d\n", rc);
 			return rc;
 		}
-
-		rc = qpnp_chg_masked_write(chip,
-			chip->usb_chgpth_base + COMP_OVR1,
-			0xFF,
-			0x2F, 1);
-		if (rc) {
-			pr_err("failed to write COMP_OVR1 rc=%d\n", rc);
-			return rc;
+		if (chip->type != SMBBP) {
+			rc = qpnp_chg_masked_write(chip,
+				chip->usb_chgpth_base + COMP_OVR1,
+				0xFF,
+				0x2F, 1);
+			if (rc) {
+				pr_err("failed to write COMP_OVR1 rc=%d\n", rc);
+				return rc;
+			}
 		}
 	}
 
@@ -4316,16 +4317,16 @@ qpnp_chg_regulator_boost_disable(struct regulator_dev *rdev)
 			pr_err("failed to write SEC_ACCESS rc=%d\n", rc);
 			return rc;
 		}
-
-		rc = qpnp_chg_masked_write(chip,
-			chip->usb_chgpth_base + COMP_OVR1,
-			0xFF,
-			0x00, 1);
-		if (rc) {
-			pr_err("failed to write COMP_OVR1 rc=%d\n", rc);
-			return rc;
+		if (chip->type != SMBBP) {
+			rc = qpnp_chg_masked_write(chip,
+				chip->usb_chgpth_base + COMP_OVR1,
+				0xFF,
+				0x00, 1);
+			if (rc) {
+				pr_err("failed to write COMP_OVR1 rc=%d\n", rc);
+				return rc;
+			}
 		}
-
 		usleep(1000);
 		/*OPPO 2013-10-31 liaofuchun delete for bq charger*/
 #ifndef CONFIG_BQ24196_CHARGER
@@ -7026,8 +7027,17 @@ bool is_alow_fast_chg(struct qpnp_chg_chip *chip)
 		return false;
 	if(chg_type != POWER_SUPPLY_TYPE_USB_DCP)
 		return false;
-#ifndef CONFIG_OPPO_DEVICE_FIND7OP
+#ifdef CONFIG_OPPO_DEVICE_N3
+	if (temp < 150 || temp > 450)
+		return false;
+	if (temp < 205 && low_temp_full == 1) {
+		return false;
+	}
+#elif defined(CONFIG_OPPO_DEVICE_FIND7OP)
 /* jingchun.wang@Onlinerd.Driver, 2014/02/25  Modify for use different temp range of 14001 */
+	if(temp < 205)
+		return false;
+#else
 	if(temp < 105)
 		return false;
 //lfc add for 13097: 10 ~ 15.5 decigec,fastchg vddmax = 4250mv
@@ -7035,10 +7045,7 @@ bool is_alow_fast_chg(struct qpnp_chg_chip *chip)
 		return false;
 	}
 //lfc add for 13097 end
-#else /*CONFIG_OPPO_DEVICE_FIND7OP*/
-	if(temp < 205)
-		return false;
-#endif /*CONFIG_OPPO_DEVICE_FIND7OP*/
+#endif
 	if(temp > 420)
 		return false;
 	if(cap < 1)

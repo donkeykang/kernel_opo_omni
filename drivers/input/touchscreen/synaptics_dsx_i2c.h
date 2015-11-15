@@ -79,6 +79,7 @@
 #define TP_VENDOR_TPK		2	//TPK
 #define TP_VENDOR_TRULY		3	//ÐÅÀû
 #define TP_VENDOR_YOUNGFAST 4   //Ñó»ª
+#define TP_VENDOR_TPK_GFF	5   //Tpk gff
 
 #define TP_TYPE_MAX		2	//we only use wintek and tpk now.
 
@@ -303,6 +304,7 @@ struct synaptics_rmi4_data {
 	unsigned char bcontinue;
 	struct workqueue_struct *reportqueue;  //for work queue
 	struct work_struct reportwork;
+	bool button_disable;
 };
 
 enum exp_fn {

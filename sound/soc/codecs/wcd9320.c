@@ -1580,6 +1580,29 @@ static int taiko_pa_gain_put(struct snd_kcontrol *kcontrol,
 	return 0;
 }
 
+#ifdef CONFIG_OPPO_DEVICE_N3
+extern void tas2552_ext_amp_on(int on);
+static int spkr_put_control(struct snd_kcontrol *kcontrol,
+				   struct snd_ctl_elem_value *ucontrol)
+{
+	unsigned int value;
+	value = ucontrol->value.integer.value[0];
+	printk("%s:val %d\n",__func__,value);
+	if(value){
+        tas2552_ext_amp_on(1);
+	}else{
+		tas2552_ext_amp_on(0);
+	}
+	return 0;
+}
+
+static int spkr_get_control(struct snd_kcontrol *kcontrol,
+				   struct snd_ctl_elem_value *ucontrol)
+{
+	return 0;
+}
+#endif
+
 static const char * const taiko_1_x_ear_pa_gain_text[] = {
 	"POS_6_DB", "UNDEFINED_1", "UNDEFINED_2", "UNDEFINED_3", "POS_2_DB",
 	"NEG_2P5_DB", "UNDEFINED_4", "NEG_12_DB"
@@ -1630,6 +1653,10 @@ static const struct soc_enum taiko_2_x_ear_pa_gain_enum =
 
 static const struct snd_kcontrol_new taiko_2_x_analog_gain_controls[] = {
 
+#ifdef CONFIG_OPPO_DEVICE_N3
+	SOC_SINGLE_EXT("SPKR Enable", 0, 0, 1, 0,
+		                 spkr_get_control, spkr_put_control),
+#endif
 	SOC_ENUM_EXT("EAR PA Gain", taiko_2_x_ear_pa_gain_enum,
 		taiko_pa_gain_get, taiko_pa_gain_put),
 
@@ -6428,8 +6455,13 @@ static int taiko_handle_pdata(struct taiko_priv *taiko)
 	}
 
 	/* Set micbias capless mode with tail current */
+/* xiaojun.lv@PhoneDpt.AudioDrv, 2014/06/27  Add for 14021 set micbias 1 to capless mode. */
+#ifdef CONFIG_OPPO_DEVICE_N3
+	value = 0x16;
+#else
 	value = (pdata->micbias.bias1_cap_mode == MICBIAS_EXT_BYP_CAP ?
 		 0x00 : 0x16);
+#endif
 	snd_soc_update_bits(codec, TAIKO_A_MICB_1_CTL, 0x1E, value);
 	value = (pdata->micbias.bias2_cap_mode == MICBIAS_EXT_BYP_CAP ?
 		 0x00 : 0x16);
